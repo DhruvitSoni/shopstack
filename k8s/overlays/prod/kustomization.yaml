@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: shopstack
+resources:
+  - namespace.yaml
+  - ../../base
+
+# In prod the secret is created out-of-band (e.g. External Secrets from AWS Secrets Manager):
+#   kubectl -n shopstack create secret generic postgres-credentials --from-literal=password=...
+
+patches:
+  # More headroom in prod
+  - target: { kind: HorizontalPodAutoscaler }
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 3
+      - op: replace
+        path: /spec/maxReplicas
+        value: 10
+  - target: { kind: Deployment, name: frontend }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+
+images:
+  - name: shopstack/frontend
+    newName: shopstack/frontend
+    newTag: latest
+  - name: shopstack/product-service
+    newName: shopstack/product-service
+    newTag: latest
+  - name: shopstack/order-service
+    newName: shopstack/order-service
+    newTag: latest

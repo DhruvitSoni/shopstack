@@ -1,0 +1,39 @@
+# Values for the kube-prometheus-stack Helm chart (installed by terraform/envs/dev/platform.tf).
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    # Only pick up ServiceMonitors / rules labelled for this release
+    serviceMonitorSelector:
+      matchLabels: { release: kube-prometheus-stack }
+    ruleSelector:
+      matchLabels: { release: kube-prometheus-stack }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources: { requests: { storage: 20Gi } }
+
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources: { requests: { storage: 2Gi } }
+  # Example Slack routing — add your webhook to enable
+  # config:
+  #   route: { receiver: slack, group_by: [alertname] }
+  #   receivers:
+  #     - name: slack
+  #       slack_configs:
+  #         - api_url: https://hooks.slack.com/services/XXX
+  #           channel: "#alerts"
+
+grafana:
+  persistence: { enabled: true, size: 5Gi }
+  # Load any ConfigMap labelled grafana_dashboard=1 (see monitoring/k8s/grafana-dashboard-configmap.yaml)
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+  labels: { app: product-service }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: product-service }
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  template:
+    metadata:
+      labels: { app: product-service }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: product-service
+          image: shopstack/product-service:latest
+          ports: [{ name: http, containerPort: 8000 }]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: postgres-credentials, key: password } }
+            - name: DATABASE_URL
+              value: postgresql+psycopg2://shop:$(POSTGRES_PASSWORD)@postgres:5432/shop
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+  labels: { app: product-service }
+spec:
+  selector: { app: product-service }
+  ports: [{ name: http, port: 8000, targetPort: http }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: product-service
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: product-service }
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: product-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: product-service }

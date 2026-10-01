@@ -1,0 +1,36 @@
+# GitOps (advanced track): Argo CD watches this repo and syncs the cluster to it.
+# Replace repoURL with your fork, then:  kubectl apply -f argocd/applications.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: shopstack-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_USER/shopstack.git
+    targetRevision: main
+    path: k8s/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: shopstack-dev
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: shopstack-monitoring
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_USER/shopstack.git
+    targetRevision: main
+    path: monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }

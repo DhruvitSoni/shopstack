@@ -1,0 +1,27 @@
+# Same rules are shipped to Kubernetes as a PrometheusRule (monitoring/k8s/prometheus-rules.yaml).
+groups:
+  - name: shopstack
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"product-service|order-service"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.job }} is down"
+
+      - alert: HighErrorRate
+        expr: |
+          sum by (service) (rate(http_requests_total{status=~"5.."}[5m]))
+            / sum by (service) (rate(http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }} 5xx rate above 5%"
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum by (le, service) (rate(http_request_duration_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }} p95 latency above 500ms"

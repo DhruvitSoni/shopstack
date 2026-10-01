@@ -1,0 +1,81 @@
+# In-cluster Postgres + Redis keep dev simple and cheap.
+# Production upgrade path: Amazon RDS for PostgreSQL + ElastiCache (see docs/ROADMAP.md).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports: [{ name: pg, containerPort: 5432 }]
+          env:
+            - { name: POSTGRES_USER, value: shop }
+            - { name: POSTGRES_DB, value: shop }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: postgres-credentials, key: password } }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "shop"] }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 5Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  selector: { app: postgres }
+  ports: [{ name: pg, port: 5432, targetPort: pg }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels: { app: redis }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["--appendonly", "yes"]
+          ports: [{ name: redis, containerPort: 6379 }]
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels: { app: redis }
+spec:
+  selector: { app: redis }
+  ports: [{ name: redis, port: 6379, targetPort: redis }]

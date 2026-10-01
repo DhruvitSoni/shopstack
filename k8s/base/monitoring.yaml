@@ -1,0 +1,14 @@
+# Tell the Prometheus Operator (kube-prometheus-stack) to scrape our services' /metrics.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: shopstack-services
+  labels: { release: kube-prometheus-stack }
+spec:
+  selector:
+    matchExpressions:
+      - { key: app, operator: In, values: [product-service, order-service] }
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

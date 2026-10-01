@@ -1,0 +1,63 @@
+# Local dev stack: the whole app + Prometheus + Grafana on your laptop.
+#   docker compose up --build
+#   App:        http://localhost:8080
+#   Prometheus: http://localhost:9090
+#   Grafana:    http://localhost:3001  (admin / admin)
+services:
+  frontend:
+    build: ./services/frontend
+    ports: ["8080:8080"]
+    depends_on: [product-service, order-service]
+
+  product-service:
+    build: ./services/product-service
+    environment:
+      DATABASE_URL: postgresql+psycopg2://shop:shop@postgres:5432/shop
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports: ["8000:8000"]
+
+  order-service:
+    build: ./services/order-service
+    environment:
+      REDIS_URL: redis://redis:6379
+      PRODUCT_SERVICE_URL: http://product-service:8000
+    depends_on:
+      redis: { condition: service_healthy }
+    ports: ["3000:3000"]
+
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: shop, POSTGRES_PASSWORD: shop, POSTGRES_DB: shop }
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  pgdata:

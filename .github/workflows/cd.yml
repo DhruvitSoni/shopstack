@@ -1,0 +1,95 @@
+# CD: on every merge to main, build images, push to ECR (tagged with the git SHA), deploy to EKS.
+# Required repo settings:
+#   Secret   AWS_ROLE_ARN   -> terraform output github_actions_role_arn
+#   Variable AWS_REGION     -> e.g. us-east-1
+#   Variable EKS_CLUSTER    -> e.g. shopstack-dev
+#   Variable DEPLOY_MODE    -> "kubectl" (push-based, default) or "gitops" (Argo CD pulls)
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # needed for AWS OIDC
+  contents: write   # needed to commit image tags in gitops mode
+
+env:
+  # workflow_run events run on the default branch tip; use the commit CI actually tested
+  IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  push-images:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [frontend, product-service, order-service]
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ env.IMAGE_TAG }}" }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/shopstack/${{ matrix.service }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+
+  deploy-dev:
+    needs: push-images
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tags in the dev overlay
+        working-directory: k8s/overlays/dev
+        run: |
+          for svc in frontend product-service order-service; do
+            kustomize edit set image "shopstack/$svc=${{ steps.ecr.outputs.registry }}/shopstack/$svc:${{ env.IMAGE_TAG }}"
+          done
+
+      - name: Deploy with kubectl (push mode)
+        if: ${{ vars.DEPLOY_MODE != 'gitops' }}
+        run: |
+          aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER }}" --region "${{ vars.AWS_REGION }}"
+          kubectl apply -k k8s/overlays/dev
+          kubectl apply -k monitoring
+          for d in frontend product-service order-service; do
+            kubectl -n shopstack-dev rollout status deploy/$d --timeout=180s
+          done
+
+      - name: Commit new tags (GitOps mode — Argo CD syncs them)
+        if: ${{ vars.DEPLOY_MODE == 'gitops' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "deploy(dev): ${{ env.IMAGE_TAG }} [skip ci]" && git push
+
+      - name: Smoke test
+        if: ${{ vars.DEPLOY_MODE != 'gitops' }}
+        run: |
+          HOST=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          for i in $(seq 1 20); do curl -fsS "http://$HOST/api/products" && exit 0; sleep 10; done
+          exit 1

@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (git-ignored) and edit.
+github_repo            = "your-github-user/shopstack"
+grafana_admin_password = "change-me-please"
+region                 = "us-east-1"
+node_capacity_type     = "SPOT"
+install_argocd         = true
